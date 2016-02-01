@@ -57,31 +57,131 @@ class SerialPortRegistry {
 let serialPortRegistry = SerialPortRegistry()
 
 class _SerialPort: NSObject {
-	
-	convenience init?(path: String) {
-		let device = io_object_t(bsdPath: path)
-		if device == 0 { return nil }
-		self.init(device:device)
-	}
-	
-	required init?(device: io_object_t) {
-		guard let bsdPath = device.bsdCalloutPath,
-			name = device.modemName else {
-				self.path = ""
-				self.IOKitDevice = 0
-				self.name = ""
-				super.init()
-				return nil
-		}
-		
-		self.path = bsdPath
-		self.IOKitDevice = device
-		self.name = name
-		
-		super.init()
-		
-		serialPortRegistry.addSerialPort(self)
-	}
+
+    /// Normal path-based initialiser
+    convenience init?(path: String) {
+        self.init(_path: path, _deviceTuple:nil)
+    }
+
+    /// Device-based initialiser
+    convenience init?(device: io_object_t) {
+        if let (path,name) = _SerialPort.parseDevice(device) {
+            self.init(_path: path, _deviceTuple:(name,device))
+        } else {
+            self.init(_path: "", _deviceTuple: nil)
+        }
+    }
+
+    /// required init combines path-based and device-based initialisation: three options
+    /// 1. a path-based initialisation that can be resolved to an IOKit device
+    /// 2. a device-based init for which path and name are resolved via IOKit
+    /// 3. a path-based init that cannot be resolved to IOKit -- e.g. virtual device
+    required init?(_path: String, _deviceTuple: (name:String, device:io_object_t)?=nil) {
+        
+        guard !_path.isEmpty else{
+            self.path = ""
+            self.IOKitDevice = 0
+            self.name = ""
+            super.init()
+            return nil
+        }
+        
+        var isAvailable : Bool = false
+        var pathfinal : String = ""
+        var namefinal : String = ""
+        var devicefinal : io_object_t = 0
+        
+        if let deviceTuple = _deviceTuple {
+            // constructor called via device
+            isAvailable = true
+            pathfinal = _path
+            namefinal = deviceTuple.name
+            devicefinal = deviceTuple.device
+            
+        } else {
+            // constructor called via path only
+
+            let tmpdevice = io_object_t(bsdPath: _path)
+            if tmpdevice == 0 {
+                // path is not available via IOKit, perhaps virtual
+                // TODO verify that a file-descriptor can be found, opened and written to
+                namefinal = "virtual-"+_path
+                pathfinal = _path
+                devicefinal = 0
+                isAvailable = true
+            } else {
+                // path is available via IOKIT
+                if let (tmppath,tmpname) = _SerialPort.parseDevice(tmpdevice) {
+                    pathfinal = tmppath
+                    devicefinal = tmpdevice
+                    namefinal = tmpname
+                    isAvailable = true
+                } else {
+                    pathfinal = ""
+                    devicefinal = 0
+                    namefinal = ""
+                    isAvailable = false
+                }
+            }
+        }
+
+        if isAvailable {
+            self.path = pathfinal
+            self.IOKitDevice = devicefinal
+            self.name = namefinal
+            print ("_SerialPort init \(self.path) \(self.IOKitDevice) \(self.name)")
+        } else {
+            self.path = ""
+            self.IOKitDevice = 0
+            self.name = ""
+            super.init()
+            return nil
+        }
+        
+        super.init()
+        
+        if isAvailable {
+            serialPortRegistry.addSerialPort(self)
+        }
+
+    }
+    
+    ///attempt to query this device with IOKit
+    /// if successful, returns a tuple
+    /// if not, returns nil
+    static func parseDevice (device:io_object_t) -> (path:String, name:String)? {
+        if let path = device.bsdCalloutPath,
+            name = device.modemName {
+                return (path,name)
+        } else {
+            return nil
+        }
+    }
+
+//	convenience init?(path: String) {
+//		let device = io_object_t(bsdPath: path)
+//		if device == 0 { return nil }
+//		self.init(device:device)
+//	}
+//	
+//	required init?(device: io_object_t) {
+//		guard let bsdPath = device.bsdCalloutPath,
+//			name = device.modemName else {
+//				self.path = ""
+//				self.IOKitDevice = 0
+//				self.name = ""
+//				super.init()
+//				return nil
+//		}
+//		
+//		self.path = bsdPath
+//		self.IOKitDevice = device
+//		self.name = name
+//		
+//		super.init()
+//		
+//		serialPortRegistry.addSerialPort(self)
+//	}
 	
 	deinit {
 		if let readPollSource = self.readPollSource {

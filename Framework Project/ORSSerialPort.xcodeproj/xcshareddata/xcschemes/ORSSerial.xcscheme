@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "0700"
+   LastUpgradeVersion = "0720"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -32,7 +32,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "9D7472121B6D7767002D8B10"
+               BlueprintIdentifier = "9D0400161C1634E2006D763F"
                BuildableName = "ORSSerialPort Tests.xctest"
                BlueprintName = "ORSSerialPort Tests"
                ReferencedContainer = "container:ORSSerialPort.xcodeproj">
