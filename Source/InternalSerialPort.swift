@@ -217,26 +217,29 @@ class _SerialPort: NSObject {
 		self.fileDescriptor = descriptor
 		doOnMainThreadAndWait { self.isOpen = true }
 		
-		// Port opened successfully, set options
-		var originalPortAttrs = termios()
-		tcgetattr(descriptor, &originalPortAttrs) // Get original options so they can be reset later
-		self.originalPortAttributes = originalPortAttrs
-		self.setOptionsOnPort()
-		
-		// Get status of RTS and DTR lines
-		var modemLines: CInt = 0
-		if (ioctlGetModemLinesState(self.fileDescriptor, &modemLines) < 0) {
-			LOG_SERIAL_PORT_ERROR("Error reading modem lines status")
-			self.notifyDelegateOfPosixError()
-		}
-		
-		let desiredRTS = self.RTS
-		let desiredDTR = self.DTR
-		self.RTS = modemLines & TIOCM_RTS != 0
-		self.DTR = modemLines & TIOCM_DTR != 0
-		self.RTS = desiredRTS
-		self.DTR = desiredDTR
-		
+
+        if (self.IOKitDevice != 0) {
+            // Port opened successfully, set options
+            var originalPortAttrs = termios()
+            tcgetattr(descriptor, &originalPortAttrs) // Get original options so they can be reset later
+            self.originalPortAttributes = originalPortAttrs
+            self.setOptionsOnPort()
+            
+            // Get status of RTS and DTR lines
+            var modemLines: CInt = 0
+            if (ioctlGetModemLinesState(self.fileDescriptor, &modemLines) < 0) {
+                LOG_SERIAL_PORT_ERROR("Error reading modem lines status")
+                self.notifyDelegateOfPosixError()
+            }
+            
+            let desiredRTS = self.RTS
+            let desiredDTR = self.DTR
+            self.RTS = modemLines & TIOCM_RTS != 0
+            self.DTR = modemLines & TIOCM_DTR != 0
+            self.RTS = desiredRTS
+            self.DTR = desiredDTR
+        }
+        
 		dispatch_async(mainQueue) { () -> Void in
 			guard let host = self.host else { return }
 			host.delegate?.serialPortWasOpened?(host)
@@ -260,36 +263,39 @@ class _SerialPort: NSObject {
 		dispatch_resume(readPollSource)
 		self.readPollSource = readPollSource
 		
-		// Start another poller to check status of CTS and DSR
-		let pollQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
-		let timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, pollQueue)
-		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 0), 10*NSEC_PER_MSEC, 5*NSEC_PER_MSEC)
-		dispatch_source_set_event_handler(timer) {
-			guard self.isOpen else {
-				dispatch_async(pollQueue) { dispatch_source_cancel(timer) }
-				return
-			}
-			
-			var modemLines: CInt = 0
-			let result = ioctlGetModemLinesState(self.fileDescriptor, &modemLines)
-			if result < 0 {
-				self.notifyDelegateOfPosixErrorWaitingUntilDone(errno == ENXIO)
-				if errno == ENXIO {
-					self.cleanupAfterSystemRemoval()
-				}
-				return
-			}
-			
-			let CTSPin = (modemLines & TIOCM_CTS) != 0
-			let DSRPin = (modemLines & TIOCM_DSR) != 0
-			let DCDPin = (modemLines & TIOCM_CAR) != 0
-			
-			if CTSPin != self.CTS { dispatch_sync(mainQueue) { self.CTS = CTSPin } }
-			if DSRPin != self.DSR { dispatch_sync(mainQueue) { self.DSR = DSRPin } }
-			if DCDPin != self.DCD { dispatch_sync(mainQueue) { self.DCD = DCDPin } }
-		}
-		self.pinPollTimer = timer
-		dispatch_resume(timer)
+		
+        if (self.IOKitDevice != 0) {
+            // Start another poller to check status of CTS and DSR
+            let pollQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0)
+            let timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, pollQueue)
+            dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 0), 10*NSEC_PER_MSEC, 5*NSEC_PER_MSEC)
+            dispatch_source_set_event_handler(timer) {
+                guard self.isOpen else {
+                    dispatch_async(pollQueue) { dispatch_source_cancel(timer) }
+                    return
+                }
+                
+                var modemLines: CInt = 0
+                let result = ioctlGetModemLinesState(self.fileDescriptor, &modemLines)
+                if result < 0 {
+                    self.notifyDelegateOfPosixErrorWaitingUntilDone(errno == ENXIO)
+                    if errno == ENXIO {
+                        self.cleanupAfterSystemRemoval()
+                    }
+                    return
+                }
+                
+                let CTSPin = (modemLines & TIOCM_CTS) != 0
+                let DSRPin = (modemLines & TIOCM_DSR) != 0
+                let DCDPin = (modemLines & TIOCM_CAR) != 0
+                
+                if CTSPin != self.CTS { dispatch_sync(mainQueue) { self.CTS = CTSPin } }
+                if DSRPin != self.DSR { dispatch_sync(mainQueue) { self.DSR = DSRPin } }
+                if DCDPin != self.DCD { dispatch_sync(mainQueue) { self.DCD = DCDPin } }
+            }
+            self.pinPollTimer = timer
+            dispatch_resume(timer)
+        }
 	}
 	
 	func close() {
@@ -468,8 +474,9 @@ class _SerialPort: NSObject {
 	// MARK: Packet Parsing
 	
 	private func packetMatchingDescriptor(descriptor: SerialPacketDescriptor, atEndOfBuffer buffer: NSData) -> NSData? {
-		for i in 1...buffer.length {
-			let window = buffer.subdataWithRange(NSRange(location: buffer.length-i, length: i))
+        //let str :String = String(NSString(data: buffer, encoding: NSASCIIStringEncoding))
+        for i in 1...buffer.length {
+            let window = buffer.subdataWithRange(NSRange(location: buffer.length-i, length: i))
 			if descriptor.dataIsValidPacket(window) { return window }
 		}
 		return nil
